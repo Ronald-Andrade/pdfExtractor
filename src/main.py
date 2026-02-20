@@ -50,26 +50,60 @@ def definir_paginas(total):
     print("--- [!] Entrada inválida. Usando documento completo. ---")
     return list(range(total)), "completo"
 
-#Função que interage com a lib PyPDF2.
+# Função que interage com a lib PyPDF2.
 def extrair_texto(caminho, lista_paginas):
-    """Realiza a extração bruta do texto das páginas selecionadas."""
-    texto = "" #Variável para acumular o texto de todas as páginas
+    """Realiza a extração bruta do texto das páginas selecionadas com tratamento de erros."""
+    texto = "" # Variável para acumular o texto de todas as páginas
     try:
-        # Abre o arquivo  PDF em modo de leitura binária ('rb')
+        # Abre o arquivo PDF em modo de leitura binária ('rb')
         with open(caminho, 'rb') as arquivo:
             leitor = PyPDF2.PdfReader(arquivo)
+
+            # --- MELHORIA: Tratamento para PDF criptografado ---
+            if leitor.is_encrypted:
+                print("--- [!] Este arquivo está protegido por senha. ---")
+                senha = input("Digite a senha para abrir o PDF: ")
+                try:
+                    leitor.decrypt(senha)
+                except:
+                    return "Erro: Falha ao tentar descriptografar o arquivo (senha incorreta)."
+
             # Percorre apenas as páginas que o usuário selecionou anteriormente
             for i in lista_paginas:
+                # Verificação de segurança: garante que o índice i existe no leitor
+                if i >= len(leitor.pages):
+                    print(f"--- [!] Aviso: A página {i+1} não existe no documento. ---")
+                    continue
+
                 print(f"--- Lendo página {i+1}... ---")
-                # Extrai o texto da páginas atual(i)
-                conteudo = leitor.pages[i].extract_text()
-                if conteudo:
-                    # Adiciona o texto ao acumulador com um cabeçalho para organização
-                    texto += f"--- PÁGINA {i+1} ---\n{conteudo}\n\n"
+                
+                # Tenta extrair o texto da página atual(i)
+                try:
+                    pagina = leitor.pages[i]
+                    conteudo = pagina.extract_text()
+                    
+                    # --- MELHORIA: Verifica se o conteúdo está vazio (PDF de imagem/scan) ---
+                    if conteudo and conteudo.strip():
+                        # Adiciona o texto ao acumulador com um cabeçalho para organização
+                        texto += f"--- PÁGINA {i+1} ---\n{conteudo}\n\n"
+                    else:
+                        # Alerta o usuário que a página pode ser uma imagem (sem texto digital)
+                        texto += f"--- PÁGINA {i+1} ---\n[Página sem texto extraível (pode ser uma imagem ou scanner)]\n\n"
+                        print(f"--- [!] Alerta: Página {i+1} parece não ter texto digital. ---")
+                
+                except Exception as erro_pag:
+                    # Caso uma página específica dê erro, o script pula para a próxima sem travar tudo
+                    print(f"--- [!] Erro ao ler a página {i+1}: {erro_pag} ---")
+                    texto += f"--- PÁGINA {i+1} ---\n[ERRO NA LEITURA DESTA PÁGINA]\n\n"
+
         return texto
+
+    except FileNotFoundError:
+        # Erro específico para quando o arquivo some ou é movido durante a execução
+        return "Erro: O arquivo não foi encontrado no caminho especificado."
     except Exception as e:
-        # Retorna a mensagem de erro técnica caso algo falhe na leitura 
-        return f"Erro na leitura: {e}"
+        # Retorna a mensagem de erro técnica caso algo falhe na leitura geral
+        return f"Erro técnico na leitura: {e}"
 
 # O finalizador que grava o resultado no disco rígido
 def salvar_arquivo(texto, caminho_original, sufixo):
