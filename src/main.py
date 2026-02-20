@@ -1,67 +1,112 @@
+import PyPDF2 # Biblioteca para manipular e extrair dados de arquivos PDF
+import os # Biblioteca para interagir com o sistema de arquivos do computador
 
-# Importações de pastas para fazer a leitura do PDF
-import PyPDF2
-import os
-import sys
+# Função que recebe a entrada do arquivo e garante que o caminho seja válido
+def obter_caminho_arquivo():
+# Solicita que o usuário digite o local do arquivo no computador
+    caminho_input = input("Digite o nome do arquivo ou o caminho completo (ex: C:\\Pasta\\meu.pdf): ").strip()
+#Remove aspas que o Windows coloca automaticamente ao "Copiar como  caminho"
+    caminho = caminho_input.replace('"', '').replace("'", "")
+    
+# Verifica se o arquivo realmente existe no endereço fornecido
+    if not os.path.exists(caminho):
+        # abspath mostra o caminho completo(absoluto) para ajudar a conferir o erro
+        print(f"--- [!] ERRO: Arquivo não encontrado em: {os.path.abspath(caminho)} ---")
+        return None
+    #  Retorna o caminho limpo e validado para quem chamou a função
+    return caminho
 
-print("--- Script iniciado com sucesso ---")
+# Função que converte o que o usuário quer em algo entendível para o computador.
+def definir_paginas(total):
+    # Mistra ao usuário o limite de páginas do documento atual
+    """Gerencia a lógica de escolha de páginas."""
+    print(f"\nTotal de páginas: {total}")
+    print("Escolha: [Número único] ou [Início-Fim] ou [ENTER para tudo]")
+    escolha = input("Sua escolha: ").strip()
 
-def processar_meu_pdf(nome_arquivo):
-    # Verifica se o arquivo está na pasta
-    if not os.path.exists(nome_arquivo):
-        print(f"--- [!] ERRO: O arquivo '{nome_arquivo}' não existe nesta pasta! ---")
+    #Se o usuário apenas apertar Enter, retorna todas as páginas
+    if not escolha:
+        return list(range(total)), "completo"
+    
+    try:
+        if "-" in escolha:
+            # Verifica se o usuário digitou um untervalo usando hífen (ex: '-5)
+            inicio, fim = map(int, escolha.split("-"))
+            # cria a lista de páginas. Subtrai 1 pois o Python começa a contar do 0.
+            #  0 min() garante que o fim não ultrapasse o total de páginas do PDF
+            indices = list(range(inicio - 1, min(fim, total)))
+            return indices, f"pag_{escolha}"
+        else:
+            # Se for apenas um número, converte para inteiro e subtrai 1
+            p = int(escolha) - 1
+            # Verifica se a página escolhida existe dentro do documento
+            if 0 <= p < total:
+                return [p], f"pag_{escolha}"
+    except ValueError:
+        # Se o usuário digitar letras ou símbolos inválidos cai aqui
+        pass
+    
+    # Caso ocorra algum erro na digitação, o padrão é processar tudo
+    print("--- [!] Entrada inválida. Usando documento completo. ---")
+    return list(range(total)), "completo"
+
+#Função que interage com a lib PyPDF2.
+def extrair_texto(caminho, lista_paginas):
+    """Realiza a extração bruta do texto das páginas selecionadas."""
+    texto = "" #Variável para acumular o texto de todas as páginas
+    try:
+        # Abre o arquivo  PDF em modo de leitura binária ('rb')
+        with open(caminho, 'rb') as arquivo:
+            leitor = PyPDF2.PdfReader(arquivo)
+            # Percorre apenas as páginas que o usuário selecionou anteriormente
+            for i in lista_paginas:
+                print(f"--- Lendo página {i+1}... ---")
+                # Extrai o texto da páginas atual(i)
+                conteudo = leitor.pages[i].extract_text()
+                if conteudo:
+                    # Adiciona o texto ao acumulador com um cabeçalho para organização
+                    texto += f"--- PÁGINA {i+1} ---\n{conteudo}\n\n"
+        return texto
+    except Exception as e:
+        # Retorna a mensagem de erro técnica caso algo falhe na leitura 
+        return f"Erro na leitura: {e}"
+
+# O finalizador que grava o resultado no disco rígido
+def salvar_arquivo(texto, caminho_original, sufixo):
+    # os.path.splitext divide o caminho em (nome, extensão). Pegamos [0] (nome)
+    # Novo nome trocando ,pdf por _sufixo.txt
+    nome_txt = os.path.splitext(caminho_original)[0] + f"_{sufixo}.txt"
+
+    #  Abre (ou cria) o arquivo TXT usando codificação UTF-8 para aceitar acentos
+    with open(nome_txt, "w", encoding="utf-8") as f:
+        f.write(texto)
+    print(f"\n--- [OK] Sucesso! Arquivo salvo em: '{nome_txt}' ---")
+
+# Quem coordena a ordem das ações
+def executar_workflow():
+    # 1. Tenta pegar o caminho do arquivo
+    """Função principal que coordena as outras."""
+    arquivo_pdf = obter_caminho_arquivo()
+    if not arquivo_pdf: # Se o caminho for inválido, encerra aqui
         return
 
-    print(f"--- Arquivo '{nome_arquivo}' localizado. Tentando abrir... ---")
+    # 2.Abre o PDF apenas para pegar o total de páginas inicialmente
+    with open(arquivo_pdf, 'rb') as f:
+        total = len(PyPDF2.PdfReader(f).pages)
 
-    try:
-        with open(nome_arquivo, 'rb') as arquivo:
-            leitor = PyPDF2.PdfReader(arquivo)
-            total_paginas = len(leitor.pages)
-            print(f"--- PDF aberto! Total de páginas: {total_paginas} ---")
+    # 3. Define quais páginas serão lidas
+    paginas, sufixo = definir_paginas(total)
 
-            texto_acumulado = ""
+    # 4. Chama a extração de texto propriamente dita
+    resultado = extrair_texto(arquivo_pdf, paginas)
 
-            for i in range(total_paginas):
-                print(f"--- [4] Lendo página {i+1}... ---")
-                pagina = leitor.pages[i]
-                conteudo = pagina.extract_text()
-                
-                if conteudo:
-                    texto_acumulado += conteudo + "\n"
-            if texto_acumulado.strip():
-                # Exibe no terminal
-                print("\n=== CONTEÚDO EXTRAÍDO ===\n")
-                print(texto_acumulado)
+    # 5. Verifica se algo foi extraído antes de mostrar e salvar
+    if resultado.strip():
+        print("\n=== CONTEÚDO EXTRAÍDO ===\n")
+        print(resultado)
+        salvar_arquivo(resultado, arquivo_pdf, sufixo)
+    else:
+        print("--- [!] Nenhum texto encontrado. ---")
 
-                # Salva em TXT (gera o nome automaticamente)
-                nome_txt = os.path.splitext(nome_arquiv)
-                else:
-                    print(f"--- [!] Alerta: Página {i+1} parece não ter texto digital (pode ser uma imagem) ---")
-
-            # Se conseguimos algum texto, vamos exibir e salvar
-            if texto_acumulado.strip():
-                print("\n=== CONTEÚDO EXTRAÍDO ===\n")
-                print(texto_acumulado)
-                
-                # Salvar em TXT
-                nome_txt = nome_arquivo.replace(".pdf", ".txt")
-                with open(nome_txt, "w", encoding="utf-8") as f:
-                    f.write(texto_acumulado)
-                print(f"\n--- [5] Sucesso! Arquivo '{nome_txt}' criado! ---")
-            else:
-                print("--- [!] FIM: Nenhum texto foi encontrado no arquivo. ---")
-
-    except Exception as e:
-        print(f"--- [!] Ocorreu um erro técnico: {e} ---")
-
-# EXECUÇÃO
 if __name__ == "__main__":
-    # Certifique-se de que o nome abaixo é IGUAL ao seu arquivo na pasta src
-    meu_arquivo = "documento.pdf.pdf" 
-    processar_meu_pdf(meu_arquivo)
-
-#os.path.exists: Evita que o programa trave se você digitar o nome do arquivo errado.
-#with open (...): Garante que o arquivo seja fechado corretamente após a leitura, economizando melhora.
-#leitor.pages: É uma lista de contendo todas as páginas do documento.
-#extract_text(): É o que transforma o dados do PDF em strings
+    executar_workflow()
